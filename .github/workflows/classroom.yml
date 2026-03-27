@@ -13,38 +13,50 @@ jobs:
     if: github.actor != 'github-classroom[bot]'
     steps:
       - uses: actions/checkout@v6
+
       - name: Análisis de calidad de codigo
         id: ruff
         uses: classroom-resources/autograding-command-grader@v1
+        continue-on-error: true
         with:
           test-name: "Análisis de calidad de código"
           setup-command: 'pip install ruff'
           command: 'ruff check --output-format=github calculadora/'
           max-score: 30
           timeout: 5
+
       - name: Pruebas unitarias y de integración
         id: pytest
         uses: classroom-resources/autograding-python-grader@v1
+        continue-on-error: true
         with:
           timeout: 10
           max-score: 70
+
       - name: Cálculo de calificación
         uses: classroom-resources/autograding-grading-reporter@v1
+        if: always()
         id: autograder
         env:
           RUFF_RESULTS: "${{ steps.ruff.outputs.result }}"
           PYTEST_RESULTS: "${{ steps.pytest.outputs.result }}"
         with:
           runners: ruff, pytest
-      - name: Reporte de calificacoón
+
+      - name: Reporte de calificación
         if: always()
         run: |
-          # 1. Decodificamos los resultados de Base64 a JSON
+          # 1. Decodificamos los resultados de Base64 a JSON si existen
+          if [ -z "${{ steps.ruff.outputs.result }}" ] || [ -z "${{ steps.pytest.outputs.result }}" ]; then
+            echo "## ⚠️ Error: Resultados no disponibles" >> $GITHUB_STEP_SUMMARY
+            echo "No se pudieron obtener los datos de los evaluadores. Revisa los logs de los pasos anteriores." >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
           echo "${{ steps.ruff.outputs.result }}" | base64 --decode > ruff_raw.json
           echo "${{ steps.pytest.outputs.result }}" | base64 --decode > pytest_raw.json
 
-          # 2. Extraemos los puntos usando 'jq' (instalado por defecto en Ubuntu)
-          # El JSON tiene una estructura: {"status": "...", "tests": [{"score": X, "max_score": Y, ...}]}
+          # 2. Extraemos los puntos usando 'jq'
           SCORE_RUFF=$(jq '.tests[0].score // 0' ruff_raw.json)
           MAX_RUFF=$(jq '.tests[0].max_score // 30' ruff_raw.json)
           
@@ -55,7 +67,7 @@ jobs:
 
           # 3. Escribimos en el Step Summary
           {
-            echo "## 📊 Resumen de Calificación Final"
+            echo "## 🎓 Resumen de Calificación Final"
             echo ""
             echo "| Evaluación | Puntos Obtenidos | Máximo Posible |"
             echo "| :--- | :---: | :---: |"
@@ -65,9 +77,17 @@ jobs:
             echo ""
             
             if [ "$TOTAL" -eq 100 ]; then
-              echo "### 🏆 ¡Perfecto! Has alcanzado la nota máxima."
+              echo "### 🏆 ¡Excelente! Nota máxima alcanzada."
+            elif [ "$TOTAL" -eq 0 ]; then
+              echo "### 🥵 Lee el archivo README.md para entender lo que tienes que hacer!"
+            else
+              echo "### 🧐 Aún tienes trabajo por delate"
             fi
+            
+            echo "RECUERDA: La practica es solo el 50% de la calificacion de la unidad 1"
+            echo "> **Nota:** Puedes ver el detalle de los errores en la pestaña **Summary** del Action o en la sección de **Checks**."
           } >> $GITHUB_STEP_SUMMARY
+
   pytest-report:
     name: 🐍 Pruebas unitarias de código
     runs-on: ubuntu-latest
@@ -92,16 +112,17 @@ jobs:
         continue-on-error: true
       - name: 🐍 Resultados de las pruebas unitarias de código
         uses: dorny/test-reporter@v1
-        if: success() || failure()
+        if: always()
         with:
           name: 🧪 Resultados de Pytest
           path: report.junit.xml
           reporter: java-junit
-          fail-on-error: true
+          fail-on-error: false
 
   ruff-report:
     name: 🦀 Análisis de estilo de código
     runs-on: ubuntu-latest
+    if: github.actor != 'github-classroom[bot]'
     steps:
       - uses: actions/checkout@v6
       - uses: astral-sh/ruff-action@v3
@@ -115,3 +136,4 @@ jobs:
           name: 🦀 Resultados del análisis de estilo de código
           path: ruff-report.xml
           reporter: java-junit
+          fail-on-error: false
