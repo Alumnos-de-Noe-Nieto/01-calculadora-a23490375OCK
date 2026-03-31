@@ -1,42 +1,139 @@
 name: Examen de codigo
 on:
   - push
-  - workflow-dispatcher
+  - workflow_dispatch
 permissions:
   checks: write
   actions: read
   contents: read
 jobs:
   calificacion-automatica:
+    name: 🤖 Calificacion automatica
     runs-on: ubuntu-latest
+    if: github.actor != 'github-classroom[bot]'
     steps:
       - uses: actions/checkout@v6
-      - name: Instalación de Python
-        uses: actions/setup-python@v6
+
+      - name: Análisis de calidad de codigo
+        id: ruff
+        uses: classroom-resources/autograding-command-grader@v1
+        continue-on-error: true
         with:
-          python-version: "3.14"
-          cache: 'pip'
-      - name: Instalación de dependencias
-        run: |
-          python3 -m pip install --upgrade pip
-          pip install ruff pytest
-      - name: Calidad de codigo
-        uses: classroom-resources/autograding-io-grader@v1
-        with:
-          test-name: 'Ruff'
+          test-name: "Análisis de calidad de código"
+          setup-command: 'pip install ruff'
           command: 'ruff check --output-format=github calculadora/'
-          expected-output: 'All checks passed!'
-          comparison-method: 'included'
           max-score: 30
+          timeout: 5
+
       - name: Pruebas unitarias y de integración
-        id: evaluacion
+        id: pytest
         uses: classroom-resources/autograding-python-grader@v1
+        continue-on-error: true
         with:
           timeout: 10
           max-score: 70
-      - name: Calificacion
+
+      - name: Cálculo de calificación
         uses: classroom-resources/autograding-grading-reporter@v1
+        if: always()
+        id: autograder
         env:
-          EVALUACION_RESULTS: "${{steps.evaluacion.outputs.result}}"
+          RUFF_RESULTS: "${{ steps.ruff.outputs.result }}"
+          PYTEST_RESULTS: "${{ steps.pytest.outputs.result }}"
         with:
-          runners: evaluacion
+          runners: ruff, pytest
+
+      - name: Reporte de calificación
+        if: always()
+        run: |
+          # 1. Decodificamos los resultados de Base64 a JSON si existen
+          if [ -z "${{ steps.ruff.outputs.result }}" ] || [ -z "${{ steps.pytest.outputs.result }}" ]; then
+            echo "## ⚠️ Error: Resultados no disponibles" >> $GITHUB_STEP_SUMMARY
+            echo "No se pudieron obtener los datos de los evaluadores. Revisa los logs de los pasos anteriores." >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          echo "${{ steps.ruff.outputs.result }}" | base64 --decode > ruff_raw.json
+          echo "${{ steps.pytest.outputs.result }}" | base64 --decode > pytest_raw.json
+
+          # 2. Extraemos los puntos usando 'jq'
+          SCORE_RUFF=$(jq '.tests[0].score // 0' ruff_raw.json)
+          MAX_RUFF=$(jq '.tests[0].max_score // 30' ruff_raw.json)
+          
+          SCORE_PYTEST=$(jq '.tests[0].score // 0' pytest_raw.json)
+          MAX_PYTEST=$(jq '.tests[0].max_score // 70' pytest_raw.json)
+
+          TOTAL=$(( SCORE_RUFF + SCORE_PYTEST ))
+
+          # 3. Escribimos en el Step Summary
+          {
+            echo "## 🎓 Resumen de Calificación Final"
+            echo ""
+            echo "| Evaluación | Puntos Obtenidos | Máximo Posible |"
+            echo "| :--- | :---: | :---: |"
+            echo "| 🤖 Calidad de Código (Ruff) | $SCORE_RUFF | $MAX_RUFF |"
+            echo "| 🐍 Pruebas Unitarias (Pytest) | $SCORE_PYTEST | $MAX_PYTEST |"
+            echo "| **RESULTADO FINAL** | **$TOTAL** | **100** |"
+            echo ""
+            
+            if [ "$TOTAL" -eq 100 ]; then
+              echo "### 🏆 ¡Excelente! Nota máxima alcanzada."
+            elif [ "$TOTAL" -eq 0 ]; then
+              echo "### 🥵 Lee el archivo README.md para entender lo que tienes que hacer!"
+            else
+              echo "### 🧐 Aún tienes trabajo por delate"
+            fi
+            
+            echo "RECUERDA: La practica es solo el 50% de la calificacion de la unidad 1"
+            echo "> **Nota:** Puedes ver el detalle de los errores en la pestaña **Summary** del Action o en la sección de **Checks**."
+          } >> $GITHUB_STEP_SUMMARY
+
+  pytest-report:
+    name: 🐍 Pruebas unitarias de código
+    runs-on: ubuntu-latest
+    if: github.actor != 'github-classroom[bot]'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Setup Python
+        uses: actions/setup-python@v6
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-cov
+      - name: Ejecutar pruebas con Pytest
+        run: |
+          pytest \
+            --junitxml=report.junit.xml \
+            --cov=calculadora \
+            --cov-report=xml:coverage.xml \
+            --cov-report=term-missing \
+            -v
+        continue-on-error: true
+      - name: 🐍 Resultados de las pruebas unitarias de código
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: 🧪 Resultados de Pytest
+          path: report.junit.xml
+          reporter: java-junit
+          fail-on-error: false
+
+  ruff-report:
+    name: 🦀 Análisis de estilo de código
+    runs-on: ubuntu-latest
+    if: github.actor != 'github-classroom[bot]'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/ruff-action@v3
+        with:
+          args: check --output-format=junit --output-file ruff-report.xml
+        continue-on-error: true
+      - name: Publicar reporte de pruebas
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: 🦀 Resultados del análisis de estilo de código
+          path: ruff-report.xml
+          reporter: java-junit
+          fail-on-error: false
