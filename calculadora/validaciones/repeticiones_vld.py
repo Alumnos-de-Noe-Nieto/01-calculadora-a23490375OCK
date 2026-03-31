@@ -34,4 +34,4 @@ def validar_repeticiones_vld(cadena: str) -> bool:
         >>> validar_repeticiones_vld("DD")
         False
     """
-    raise NotImplementedError()
+    return all(simbolo * 2 not in cadena for simbolo in 'VLD')

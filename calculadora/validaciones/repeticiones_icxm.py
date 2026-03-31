@@ -36,7 +36,4 @@ def validar_repeticiones_icxm(cadena: str) -> bool:
         >>> validar_repeticiones_icxm("MMMM")
         False
     """
-    for simbolo in 'IXCM':
-        if simbolo * 4 in cadena:
-            return False
-    return True
+    return all(simbolo * 4 not in cadena for simbolo in 'IXCM')
